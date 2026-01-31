@@ -2,20 +2,30 @@ import telebot
 import random
 import datetime
 import sqlite3
+import os  
+from dotenv import load_dotenv 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import atexit
 
+
+load_dotenv()
+
 # ==================== НАСТРОЙКИ ====================
-TOKEN = "8400812295:AAGgpwpOzulDejS_ljmwRL56X9GlRdsKOWM"
+TOKEN = os.getenv("BOT_TOKEN") 
+
 ADMIN_ID = 5602213785
 BOT_USERNAME = "cashblrd_bot"
 WITHDRAW_CHANNEL = "@cashzay"
 
+if not TOKEN:
+    print("Ошибка: Токен не найден в файле .env!")
+    exit()
+
 bot = telebot.TeleBot(TOKEN)
+
 
 DB_PATH = "bot_data.db"
 
-# Глобальное соединение
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.execute("PRAGMA journal_mode=WAL;")
 conn.execute("PRAGMA busy_timeout=5000;")
@@ -115,11 +125,10 @@ def register_referral(user_id, referrer_id):
         return
     c.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, referrer_id))
     c.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id = ?", (referrer_id,))
-    add_stars(referrer_id, 7)   # изменено на 7
-    add_stars(user_id, 3)       # изменено на 3
+    add_stars(referrer_id, 7)   
+    add_stars(user_id, 3)
     conn.commit()
 
-    # Красивое уведомление рефереру
     try:
         bot.send_message(referrer_id, 
             f"🎉 Новый реферал!\n"
@@ -129,7 +138,6 @@ def register_referral(user_id, referrer_id):
     except Exception as e:
         print(f"Ошибка уведомления рефереру {referrer_id}: {e}")
 
-    # Уведомление админу
     try:
         bot.send_message(ADMIN_ID, f"Новый реферал! {user_id} от {referrer_id}")
     except:
@@ -215,7 +223,6 @@ def get_user_profile(user_id):
         return None
     stars, referrals, games_today = row
     
-    # Подписки на спонсоров
     c.execute("SELECT COUNT(*) FROM subscriptions WHERE user_id = ?", (user_id,))
     subs_count = c.fetchone()[0]
     
@@ -278,18 +285,14 @@ def activate_promo(user_id, code):
     if left <= 0:
         return "Промокод исчерпан"
     
-    # Проверяем, активировал ли юзер уже
     c.execute("SELECT 1 FROM promo_activations WHERE user_id = ? AND code = ?", (user_id, code))
     if c.fetchone():
         return "Ты уже активировал этот промокод"
     
-    # Списываем активацию
     c.execute("UPDATE promo_codes SET activations_left = activations_left - 1 WHERE code = ?", (code,))
     
-    # Записываем активацию
     c.execute("INSERT INTO promo_activations (user_id, code) VALUES (?, ?)", (user_id, code))
-    
-    # Даём звёзды
+
     add_stars(user_id, stars)
     
     conn.commit()
@@ -311,7 +314,6 @@ def start(message):
     stars = get_stars(user_id)
     ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
 
-    # ← Вот текст сообщения (обязательно создаём переменную text)
     text = (
         f"Привет, {message.from_user.first_name}! ⭐\n"
         f"У тебя {stars} звёзд\n\n"
@@ -383,7 +385,7 @@ def process_guess(call):
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("Подписаться на канал", url=f"https://t.me/{sponsor['username']}"))
             markup.row(InlineKeyboardButton("Проверить подписку", callback_data=f"check_sub_{sponsor['id']}"))
-            markup.row(InlineKeyboardButton("Пригласить друга вместо", url=f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"))
+            markup.row(InlineKeyboardButton("Пригласить друга", url=f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"))
             text += "\n\nЧтобы продолжить — подпишись на спонсора или пригласи друга!"
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
             bot.answer_callback_query(call.id)
@@ -508,10 +510,9 @@ def view_profile_handler(message):
         if query.isdigit():
             user_id = int(query)
         else:
-            # Ищем по username
-            user = bot.get_chat_member("@"+query, message.from_user.id)  # dummy call to get ID, но лучше использовать search
-            user_id = user.user.id  # не сработает, нужен другой способ
-            # На практике username → ID получить сложно без базы, поэтому пока только ID
+            
+            user = bot.get_chat_member("@"+query, message.from_user.id)  
+            user_id = user.user.id  
             bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
             return
     except:
