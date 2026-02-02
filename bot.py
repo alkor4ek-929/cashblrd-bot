@@ -411,10 +411,12 @@ def check_sub(call):
         member = bot.get_chat_member(f"@{channel}", user_id)
         if member.status in ['member', 'administrator', 'creator']:
             mark_subscribed(user_id, sponsor_id)
-            add_stars(user_id, 5)  # ← +10 за подписку (можно изменить)
+            add_stars(user_id, 5)# ← +10 за подписку (можно изменить)
+            bot.delete_message(call.message.chat.id, call.message.message_id)# ← +10 за подписку (можно изменить)
             bot.answer_callback_query(call.id, "Подписка подтверждена! +5 ⭐", show_alert=True)
             bot.send_message(ADMIN_ID, f"Новая подписка! {user_id} на @{channel}")
             play(call.message)
+            
         else:
             bot.answer_callback_query(call.id, "Ещё не подписан. Подпишись и попробуй снова!", show_alert=True)
     except Exception as e:
