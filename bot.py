@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import atexit
-
+from telebot import types
 
 load_dotenv()
 
@@ -51,11 +51,13 @@ def init_db():
         )
     ''')
     c.execute('''
-        CREATE TABLE IF NOT EXISTS sponsors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel_username TEXT UNIQUE NOT NULL
-        )
-    ''')
+    CREATE TABLE IF NOT EXISTS sponsors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_username TEXT UNIQUE NOT NULL,
+        active INTEGER DEFAULT 1,
+        for_tasks INTEGER DEFAULT 0
+    )
+''')
     c.execute('''
         CREATE TABLE IF NOT EXISTS subscriptions (
             user_id INTEGER,
@@ -266,7 +268,7 @@ def get_withdrawal_message_text(withdrawal_id, user_id, username, amount, item, 
     return (
         f"Вывод #{withdrawal_id}\n"
         f"👤 Юзер: @{username} | ID: {user_id}\n"
-        f"💫 Количество: {amout}.0 [{item}]\n"
+        f"💫 Количество: {amount}.0 [{item}]\n"
         f"Статус: {status}"
     )
 
