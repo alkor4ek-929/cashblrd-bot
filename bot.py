@@ -91,6 +91,12 @@ def init_db():
             PRIMARY KEY (user_id, code)
         )
     ''')
+
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN tasks_today INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+        
 conn.commit()
 
 init_db()
@@ -297,6 +303,21 @@ def activate_promo(user_id, code):
     
     conn.commit()
     return f"Промокод активирован! +{stars} ⭐"
+
+def process_admin_task_sponsor(message):
+    channel = message.text.strip()
+    if not channel.startswith('@'):
+        channel = '@' + channel
+    
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO sponsors (channel_username, for_tasks) VALUES (?, 1)", (channel,))
+        conn.commit()
+        bot.reply_to(message, f"Канал {channel} добавлен для заданий!")
+    except sqlite3.IntegrityError:
+        c.execute("UPDATE sponsors SET for_tasks = 1 WHERE channel_username = ?", (channel,))
+        conn.commit()
+        bot.reply_to(message, f"Канал {channel} обновлён для заданий!")
 # ==================== ХЭНДЛЕРЫ ====================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -323,6 +344,7 @@ def start(message):
     )
 
     markup = InlineKeyboardMarkup()
+    markup.add(types.KeyboardButton("💼Задания"))
     markup.add(InlineKeyboardButton("🎁 Промокод", callback_data="enter_promo"))
 
     bot.send_message(message.chat.id, text, reply_markup=markup)
@@ -428,6 +450,43 @@ def enter_promo(call):
     admin_states[call.from_user.id] = "waiting_promo_code"
     bot.send_message(call.message.chat.id, "Введите промокод:")
     bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("check_sub_"))
+def check_sub_callback(call):
+    user_id = call.from_user.id
+    channel = call.data.split("_")[2]
+
+    try:
+        status = bot.get_chat_member(channel, user_id).status
+        if status in ['member', 'administrator', 'creator']:
+            c = conn.cursor()
+            c.execute("UPDATE users SET stars = stars + 0.25 WHERE user_id = ?", (user_id,))
+            conn.commit()
+
+            bot.answer_callback_query(call.id, "Подписка подтверждена! +0.25⭐️", show_alert=True)
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text="Подписка подтверждена! +0.25⭐️\nМожешь взять новое задание позже."
+            )
+        else:
+            bot.answer_callback_query(call.id, "Ты ещё не подписался 😕 Подпишись и попробуй снова!", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Ошибка проверки подписки. Попробуй позже.", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_task_sponsor")
+def admin_task_sponsor(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Доступ запрещён")
+        return
+    
+    bot.send_message(
+        call.message.chat.id,
+        "Введи @username канала для заданий (например @channel_name):"
+    )
+    bot.register_next_step_handler(call.message, process_admin_task_sponsor)
+
+
 # ==================== МАРКЕТ ====================
 @bot.message_handler(commands=['market'])
 def market(message):
@@ -572,6 +631,8 @@ def admin_consol(message):
     markup.row(InlineKeyboardButton("Просмотр профиля юзера", callback_data="admin_view_profile"))
     markup.row(InlineKeyboardButton("Общая статистика", callback_data="admin_stats"))
     markup.row(InlineKeyboardButton("Создать промокод", callback_data="admin_create_promo"))
+    markup.row(InlineKeyboardButton("Спонсор Задания", callback_data="admin_task_sponsor"))
+    
     bot.reply_to(message, "Админ-консоль:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
@@ -672,7 +733,6 @@ def admin_input_handler(message):
         except ValueError:
             bot.reply_to(message, "Неверная сумма. Попробуйте заново.")
 
-    # ← Новый блок для промокодов — вставлен правильно
     elif state == "waiting_create_promo":
         try:
             parts = message.text.strip().split()
@@ -704,6 +764,41 @@ def promo_input_user(message):
     result = activate_promo(message.from_user.id, code)
     bot.reply_to(message, result)
     del admin_states[message.from_user.id]
+
+@bot.message_handler(func=lambda message: message.text == "💼Задания")
+def tasks_handler(message):
+    user_id = message.from_user.id
+
+    c = conn.cursor()
+    today = datetime.date.today().isoformat()
+    c.execute("SELECT tasks_today FROM users WHERE user_id = ?", (user_id,))
+    tasks_today = c.fetchone()[0] if c.fetchone() else 0
+
+    if tasks_today >= 10:
+        bot.reply_to(message, "Лимит заданий на сегодня. Завтра новые! 😔")
+        return
+
+    c.execute("SELECT channel_username FROM sponsors WHERE active = 1 LIMIT 1")
+    sponsor = c.fetchone()
+
+    if sponsor:
+        channel = sponsor[0] 
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(types.InlineKeyboardButton("Канал", url=f"https://t.me/{channel[1:]}"))
+        markup.add(types.InlineKeyboardButton("Подтвердить", callback_data=f"check_sub_{channel}"))
+
+        bot.reply_to(message,
+            "Получи звезды за задание! 👇\n\n"
+            f"🟢 Подпишись на канал и нажми \"Подтвердить\"\n\n"
+            "Вознаграждение: +0.25⭐️",
+            reply_markup=markup
+        )
+
+        c.execute("UPDATE users SET tasks_today = tasks_today + 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+    else:
+        bot.reply_to(message, "Заданий пока нет 😔\nПриходи позже!")
 
 # ==================== ЗАПУСК ====================
 print("Бот запущен...")
