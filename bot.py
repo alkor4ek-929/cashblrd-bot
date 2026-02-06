@@ -35,73 +35,84 @@ atexit.register(conn.close)
 # ==================== ИНИЦИАЛИЗАЦИЯ БАЗЫ ====================
 def init_db():
     c = conn.cursor()
-    try: c.execute("ALTER TABLE users ADD COLUMN games_today INTEGER DEFAULT 0")
-    except: pass
-    try: c.execute("ALTER TABLE users ADD COLUMN last_game_date TEXT DEFAULT NULL")
-    except: pass
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
-            stars INTEGER DEFAULT 10,
+            stars REAL DEFAULT 0.0,
             referrals INTEGER DEFAULT 0,
             referrer_id INTEGER DEFAULT NULL,
             games_today INTEGER DEFAULT 0,
-            last_game_date TEXT DEFAULT NULL
+            last_game_date TEXT DEFAULT NULL,
+            tasks_today INTEGER DEFAULT 0
         )
     ''')
+    
     c.execute('''
-    CREATE TABLE IF NOT EXISTS sponsors (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel_username TEXT UNIQUE NOT NULL,
-        active INTEGER DEFAULT 1,
-        for_tasks INTEGER DEFAULT 0
-    )
-''')
+        CREATE TABLE IF NOT EXISTS sponsors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_username TEXT UNIQUE NOT NULL,
+            active INTEGER DEFAULT 1,
+            for_tasks INTEGER DEFAULT 0
+        )
+    ''')
+
     c.execute('''
-        CREATE TABLE IF NOT EXISTS subscriptions (
+        CREATE TABLE IF NOT EXISTS completed_tasks (
             user_id INTEGER,
-            sponsor_id INTEGER,
-            subscribed_at TEXT,
-            PRIMARY KEY (user_id, sponsor_id)
+            channel_username TEXT,
+            PRIMARY KEY (user_id, channel_username)
         )
     ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            reward REAL NOT NULL,
+            uses_left INTEGER NOT NULL
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS used_promos (
+            user_id INTEGER,
+            code TEXT,
+            PRIMARY KEY (user_id, code)
+        )
+    ''')
+
+    
     c.execute('''
         CREATE TABLE IF NOT EXISTS withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
             username TEXT,
-            amount INTEGER,
+            amount REAL,
             item TEXT,
             status TEXT DEFAULT 'Ожидает обработки',
             created_at TEXT
         )
     ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS promo_codes (
-            code TEXT PRIMARY KEY,
-            stars INTEGER NOT NULL,
-            activations_left INTEGER NOT NULL,
-            created_at TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS promo_activations (
-            user_id INTEGER,
-            code TEXT,
-            activated_at TEXT,
-            PRIMARY KEY (user_id, code)
-        )
-    ''')
 
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN tasks_today INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-        
-conn.commit()
+    columns_to_add = [
+        ("users", "tasks_today", "INTEGER DEFAULT 0"),
+        ("users", "games_today", "INTEGER DEFAULT 0"),
+        ("users", "last_game_date", "TEXT DEFAULT NULL"),
+        ("sponsors", "active", "INTEGER DEFAULT 1"),
+        ("sponsors", "for_tasks", "INTEGER DEFAULT 0")
+    ]
+
+    for table, column, definition in columns_to_add:
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError:
+            pass # Колонки уже есть
+
+    conn.commit()
+    print("База данных успешно инициализирована")
 
 init_db()
+
 
 # ==================== ФУНКЦИИ ====================
 def get_stars(user_id):
@@ -453,28 +464,39 @@ def enter_promo(call):
     bot.send_message(call.message.chat.id, "Введите промокод:")
     bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("check_sub_"))
-def check_sub_callback(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("task_check_"))
+def task_done_callback(call):
     user_id = call.from_user.id
-    channel = call.data.split("_")[2]
+    channel = call.data.replace("task_check_", "")
+    full_channel = f"@{channel}"
 
     try:
-        status = bot.get_chat_member(channel, user_id).status
-        if status in ['member', 'administrator', 'creator']:
+        member = bot.get_chat_member(full_channel, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
             c = conn.cursor()
+            
+            
+            c.execute("SELECT 1 FROM completed_tasks WHERE user_id = ? AND channel_username = ?", (user_id, full_channel))
+            if c.fetchone():
+                bot.answer_callback_query(call.id, "⚠️ Вы уже получили награду за этот канал!", show_alert=True)
+                return
+
+            
             c.execute("UPDATE users SET stars = stars + 0.25 WHERE user_id = ?", (user_id,))
+            c.execute("INSERT INTO completed_tasks (user_id, channel_username) VALUES (?, ?)", (user_id, full_channel))
             conn.commit()
 
-            bot.answer_callback_query(call.id, "Подписка подтверждена! +0.25⭐️", show_alert=True)
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                text="Подписка подтверждена! +0.25⭐️\nМожешь взять новое задание позже."
+                text=f"✅ Задание выполнено! Награда **+0.25⭐️** зачислена.",
+                parse_mode="Markdown"
             )
         else:
-            bot.answer_callback_query(call.id, "Ты ещё не подписался 😕 Подпишись и попробуй снова!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Подписка не найдена! Проверь еще раз.", show_alert=True)
     except Exception as e:
-        bot.answer_callback_query(call.id, "Ошибка проверки подписки. Попробуй позже.", show_alert=True)
+        bot.answer_callback_query(call.id, "⚠️ Ошибка..", show_alert=True)
+        
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_task_sponsor")
 def admin_task_sponsor(call):
@@ -770,37 +792,37 @@ def promo_input_user(message):
 @bot.message_handler(func=lambda message: message.text == "💼Задания")
 def tasks_handler(message):
     user_id = message.from_user.id
-
     c = conn.cursor()
-    today = datetime.date.today().isoformat()
-    c.execute("SELECT tasks_today FROM users WHERE user_id = ?", (user_id,))
-    tasks_today = c.fetchone()[0] if c.fetchone() else 0
-
-    if tasks_today >= 10:
-        bot.reply_to(message, "Лимит заданий на сегодня. Завтра новые! 😔")
-        return
-
-    c.execute("SELECT channel_username FROM sponsors WHERE active = 1 LIMIT 1")
+    
+    c.execute('''
+        SELECT channel_username FROM sponsors 
+        WHERE active = 1 AND channel_username NOT IN (
+            SELECT channel_username FROM completed_tasks WHERE user_id = ?
+        ) LIMIT 1
+    ''', (user_id,))
+    
     sponsor = c.fetchone()
 
     if sponsor:
-        channel = sponsor[0] 
+        channel = sponsor[0]
+        clean_channel = channel.lstrip('@') 
 
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(types.InlineKeyboardButton("Канал", url=f"https://t.me/{channel[1:]}"))
-        markup.add(types.InlineKeyboardButton("Подтвердить", callback_data=f"check_sub_{channel}"))
-
-        bot.reply_to(message,
-            "Получи звезды за задание! 👇\n\n"
-            f"🟢 Подпишись на канал и нажми \"Подтвердить\"\n\n"
-            "Вознаграждение: +0.25⭐️",
-            reply_markup=markup
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{clean_channel}"),
+            types.InlineKeyboardButton("✅ Проверить подписку", callback_data=f"task_check_{clean_channel}")
         )
 
-        c.execute("UPDATE users SET tasks_today = tasks_today + 1 WHERE user_id = ?", (user_id,))
-        conn.commit()
+        bot.reply_to(message,
+            "✨ **Новое задание!** ✨\n\n"
+            f"Подпишись на канал и получи награду.\n\n"
+            "💰 Вознаграждение: **+0.25⭐️**",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
     else:
-        bot.reply_to(message, "Заданий пока нет 😔\nПриходи позже!")
+        bot.reply_to(message, "😔 Пока заданий нет. Заходи позже или приглашай друзей!")
+        
 
 # ==================== ЗАПУСК ====================
 print("Бот запущен...")
