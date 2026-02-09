@@ -15,7 +15,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 ADMIN_ID = 5602213785
 BOT_USERNAME = "cashblrd_bot"
-WITHDRAW_CHANNEL = "@cashzay"
+WITHDRAW_CHANNEL = -1003472060181
 
 if not TOKEN:
     print("Ошибка: Токен не найден в файле .env!")
@@ -35,6 +35,71 @@ atexit.register(conn.close)
 # ==================== ИНИЦИАЛИЗАЦИЯ БАЗЫ ====================
 def init_db():
     c = conn.cursor()
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            user_id INTEGER,
+            sponsor_id INTEGER,
+            subscribed_at TEXT
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            stars REAL DEFAULT 0.0,
+            referrals INTEGER DEFAULT 0,
+            referrer_id INTEGER DEFAULT NULL,
+            games_today INTEGER DEFAULT 0,
+            last_game_date TEXT DEFAULT NULL,
+            tasks_today INTEGER DEFAULT 0
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sponsors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_username TEXT UNIQUE NOT NULL,
+            active INTEGER DEFAULT 1,
+            for_tasks INTEGER DEFAULT 0
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS completed_tasks (
+            user_id INTEGER,
+            channel_username TEXT,
+            PRIMARY KEY (user_id, channel_username)
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            reward REAL NOT NULL,
+            uses_left INTEGER NOT NULL
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS used_promos (
+            user_id INTEGER,
+            code TEXT,
+            PRIMARY KEY (user_id, code)
+        )
+    ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            amount REAL,
+            item TEXT,
+            status TEXT DEFAULT 'Ожидает обработки',
+            created_at TEXT
+        )
+    ''')
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -106,7 +171,7 @@ def init_db():
         try:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         except sqlite3.OperationalError:
-            pass # Колонки уже есть
+            pass 
 
     conn.commit()
     print("База данных успешно инициализирована")
@@ -283,11 +348,11 @@ def get_withdrawal_message_text(withdrawal_id, user_id, username, amount, item, 
         f"Статус: {status}"
     )
 
-def create_promo(code, stars, activations):
+def create_promo(code, reward, uses):
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO promo_codes (code, stars, activations_left, created_at) VALUES (?, ?, ?, ?)",
-                  (code, stars, activations, datetime.datetime.now().isoformat()))
+        c.execute("INSERT INTO promo_codes (code, reward, uses_left) VALUES (?, ?, ?)",
+                  (code, reward, uses))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -295,27 +360,25 @@ def create_promo(code, stars, activations):
 
 def activate_promo(user_id, code):
     c = conn.cursor()
-    c.execute("SELECT stars, activations_left FROM promo_codes WHERE code = ?", (code,))
+    c.execute("SELECT reward, uses_left FROM promo_codes WHERE code = ?", (code,))
     row = c.fetchone()
     if not row:
         return "Промокод не найден или истёк"
     
-    stars, left = row
+    reward, left = row
     if left <= 0:
         return "Промокод исчерпан"
     
-    c.execute("SELECT 1 FROM promo_activations WHERE user_id = ? AND code = ?", (user_id, code))
+    c.execute("SELECT 1 FROM used_promos WHERE user_id = ? AND code = ?", (user_id, code))
     if c.fetchone():
         return "Ты уже активировал этот промокод"
     
-    c.execute("UPDATE promo_codes SET activations_left = activations_left - 1 WHERE code = ?", (code,))
-    
-    c.execute("INSERT INTO promo_activations (user_id, code) VALUES (?, ?)", (user_id, code))
-
-    add_stars(user_id, stars)
-    
+    c.execute("UPDATE promo_codes SET uses_left = uses_left - 1 WHERE code = ?", (code,))
+    c.execute("INSERT INTO used_promos (user_id, code) VALUES (?, ?)", (user_id, code))
+    add_stars(user_id, reward)
     conn.commit()
-    return f"Промокод активирован! +{stars} ⭐"
+    return f"Промокод активирован! +{reward} ⭐"
+    
 
 def process_admin_task_sponsor(message):
     channel = message.text.strip()
@@ -555,7 +618,7 @@ def market_callback(call):
         markup.row(
             InlineKeyboardButton("✅ Принять", callback_data=f"accept_{withdrawal_id}"),
             InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{withdrawal_id}")
-        )
+        ) 
         bot.send_message(WITHDRAW_CHANNEL, text, reply_markup=markup, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Заявка создана! Ожидай обработки в канале: @cashzay", show_alert=True)
 
@@ -822,6 +885,15 @@ def tasks_handler(message):
         )
     else:
         bot.reply_to(message, "😔 Пока заданий нет. Заходи позже или приглашай друзей!")
+
+@bot.message_handler(func=lambda message: admin_states.get(message.from_user.id) == "waiting_promo_code")
+def promo_input_user(message):
+    code = message.text.strip()
+    result = activate_promo(message.from_user.id, code)
+    bot.reply_to(message, result)
+    # Обязательно очищаем состояние
+    if message.from_user.id in admin_states:
+        del admin_states[message.from_user.id]
         
 
 # ==================== ЗАПУСК ====================
