@@ -764,6 +764,14 @@ def admin_callback(call):
         bot.send_message(call.message.chat.id, "Введите промокод в формате: код кол-во_звёзд кол-во_активаций\nПример: GIFT50 100 20")
         bot.answer_callback_query(call.id)
 
+@bot.message_handler(func=lambda message: admin_states.get(message.from_user.id) == "waiting_promo_code")
+def promo_input_user(message):
+    code = message.text.strip()
+    result = activate_promo(message.from_user.id, code)
+    bot.reply_to(message, result)
+    if message.from_user.id in admin_states:
+        del admin_states[message.from_user.id]
+
 @bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID and message.from_user.id in admin_states)
 def admin_input_handler(message):
     state = admin_states.get(message.from_user.id)
@@ -886,14 +894,7 @@ def tasks_handler(message):
     else:
         bot.reply_to(message, "😔 Пока заданий нет. Заходи позже или приглашай друзей!")
 
-@bot.message_handler(func=lambda message: admin_states.get(message.from_user.id) == "waiting_promo_code")
-def promo_input_user(message):
-    code = message.text.strip()
-    result = activate_promo(message.from_user.id, code)
-    bot.reply_to(message, result)
-    # Обязательно очищаем состояние
-    if message.from_user.id in admin_states:
-        del admin_states[message.from_user.id]
+
         
 
 # ==================== ЗАПУСК ====================
