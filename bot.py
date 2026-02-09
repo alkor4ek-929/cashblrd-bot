@@ -420,8 +420,8 @@ def start(message):
     )
 
     markup = InlineKeyboardMarkup()
-    markup.add(types.KeyboardButton("💼Задания"))
-    markup.add(InlineKeyboardButton("🎁 Промокод", callback_data="enter_promo"))
+markup.add(InlineKeyboardButton("💼 Задания", callback_data="open_tasks"))
+markup.add(InlineKeyboardButton("🎁 Промокод", callback_data="enter_promo"))
 
     bot.send_message(message.chat.id, text, reply_markup=markup)
 
