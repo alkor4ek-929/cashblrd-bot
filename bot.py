@@ -598,6 +598,12 @@ def market_callback(call):
         bot.answer_callback_query(call.id, f"Твой баланс: {stars} ⭐", show_alert=True)
         return
 
+    if call.data == "tasks":
+        tasks_handler(call.message) # Вызываем функцию заданий
+        bot.answer_callback_query(call.id)
+        return
+        
+
     if call.data == "buy_gift":
         stars = get_stars(user_id)
         referrals = get_referrals_count(user_id)
