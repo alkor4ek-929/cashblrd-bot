@@ -528,6 +528,11 @@ def enter_promo(call):
     bot.send_message(call.message.chat.id, "Введите промокод:")
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data == "open_tasks")
+def open_tasks_callback(call):
+    tasks_handler(call.message)
+    bot.answer_callback_query(call.id)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("task_check_"))
 def task_done_callback(call):
     user_id = call.from_user.id
@@ -662,16 +667,16 @@ def admin_view_profile(call):
 def view_profile_handler(message):
     query = message.text.strip().lstrip("@")
     try:
-    if query.isdigit():
-        user_id = int(query)
-    else:
-        bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
+        if query.isdigit():
+            user_id = int(query)
+        else:
+            bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
+            del admin_states[message.from_user.id]
+            return
+    except:
+        bot.reply_to(message, "Не удалось найти юзера. Введи числовой user_id.")
         del admin_states[message.from_user.id]
         return
-except:
-    bot.reply_to(message, "Не удалось найти юзера. Введи числовой user_id.")
-    del admin_states[message.from_user.id]
-    return
 
     profile = get_user_profile(user_id)
     if not profile:
