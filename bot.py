@@ -873,7 +873,7 @@ def tasks_handler(message):
     
     c.execute('''
         SELECT channel_username FROM sponsors 
-        WHERE active = 1 AND channel_username NOT IN (
+        WHERE for_tasks = 1 AND channel_username NOT IN (
             SELECT channel_username FROM completed_tasks WHERE user_id = ?
         ) LIMIT 1
     ''', (user_id,))
