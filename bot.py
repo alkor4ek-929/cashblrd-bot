@@ -194,16 +194,13 @@ def get_stars(user_id):
 
 def add_stars(user_id, amount):
     c = conn.cursor()
-    c.execute("SELECT stars FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    current = row[0] if row else 10
-    new_balance = current + amount
-    if new_balance < 0:
-        new_balance = 0
     c.execute("""
-        INSERT INTO users (user_id, stars) VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET stars = ?
-    """, (user_id, new_balance, new_balance))
+        UPDATE users
+        SET stars = MAX(stars + ?, 0)
+        WHERE user_id = ?
+    """, (amount, user_id))
+    if c.rowcount == 0:
+        c.execute("INSERT INTO users (user_id, stars) VALUES (?, ?)", (user_id, max(amount, 0)))
     conn.commit()
 
 def register_referral(user_id, referrer_id):
@@ -211,8 +208,9 @@ def register_referral(user_id, referrer_id):
         return
     c = conn.cursor()
     c.execute("SELECT referrer_id FROM users WHERE user_id = ?", (user_id,))
-    if c.fetchone():
-        return
+    row = c.fetchone()
+    if row and row[0] is not None:
+    return
     c.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, referrer_id))
     c.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id = ?", (referrer_id,))
     add_stars(referrer_id, 7)   
