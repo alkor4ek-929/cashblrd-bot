@@ -23,6 +23,8 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
+admin_states = {}
+
 
 DB_PATH = "bot_data.db"
 
@@ -184,7 +186,11 @@ def get_stars(user_id):
     c = conn.cursor()
     c.execute("SELECT stars FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
-    return row[0] if row else 10
+    if row:
+        return row[0]
+    c.execute("INSERT INTO users (user_id, stars) VALUES (?, ?)", (user_id, 10))
+    conn.commit()
+    return 10
 
 def add_stars(user_id, amount):
     c = conn.cursor()
@@ -324,16 +330,14 @@ def get_sponsor_stats():
     return c.fetchall()
 
 def create_withdrawal(user_id, username, amount, item):
+def create_withdrawal(user_id, username, amount, item):
     c = conn.cursor()
-    c.execute("SELECT MAX(id) FROM withdrawals")
-    last_id = c.fetchone()[0] or 0
-    new_id = last_id + 1
     c.execute("""
-        INSERT INTO withdrawals (id, user_id, username, amount, item, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (new_id, user_id, username, amount, item, datetime.datetime.now().isoformat()))
+        INSERT INTO withdrawals (user_id, username, amount, item, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, username, amount, item, datetime.datetime.now().isoformat()))
     conn.commit()
-    return new_id
+    return c.lastrowid
 
 def update_withdrawal_status(withdrawal_id, new_status):
     c = conn.cursor()
@@ -344,7 +348,7 @@ def get_withdrawal_message_text(withdrawal_id, user_id, username, amount, item, 
     return (
         f"Вывод #{withdrawal_id}\n"
         f"👤 Юзер: @{username} | ID: {user_id}\n"
-        f"💫 Количество: {amount}.0 [{item}]\n"
+        f"💫 Количество: {amount} [{item}]\n"
         f"Статус: {status}"
     )
 
@@ -506,7 +510,7 @@ def check_sub(call):
     channel = row[0]
 
     try:
-        member = bot.get_chat_member(f"@{channel}", user_id)
+        member = bot.get_chat_member(channel, user_id)
         if member.status in ['member', 'administrator', 'creator']:
             mark_subscribed(user_id, sponsor_id)
             add_stars(user_id, 5)# ← +10 за подписку (можно изменить)
@@ -664,12 +668,9 @@ def view_profile_handler(message):
         if query.isdigit():
             user_id = int(query)
         else:
-            
-            user = bot.get_chat_member("@"+query, message.from_user.id)  
-            user_id = user.user.id  
-            bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
-            return
-    except:
+        bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
+        return
+        except:
         bot.reply_to(message, "Не удалось найти юзера. Введи числовой user_id.")
         return
 
@@ -706,7 +707,6 @@ def sponsor_stats(call):
     bot.answer_callback_query(call.id)
 
 # ==================== АДМИН-КОНСОЛЬ ====================
-admin_states = {}
 
 @bot.message_handler(commands=['consol'])
 def admin_consol(message):
@@ -770,13 +770,6 @@ def admin_callback(call):
         bot.send_message(call.message.chat.id, "Введите промокод в формате: код кол-во_звёзд кол-во_активаций\nПример: GIFT50 100 20")
         bot.answer_callback_query(call.id)
 
-@bot.message_handler(func=lambda message: admin_states.get(message.from_user.id) == "waiting_promo_code")
-def promo_input_user(message):
-    code = message.text.strip()
-    result = activate_promo(message.from_user.id, code)
-    bot.reply_to(message, result)
-    if message.from_user.id in admin_states:
-        del admin_states[message.from_user.id]
 
 @bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID and message.from_user.id in admin_states)
 def admin_input_handler(message):
