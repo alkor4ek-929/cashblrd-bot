@@ -533,6 +533,28 @@ def open_tasks_callback(call):
     tasks_handler(call.message)
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("accept_"))
+def accept_withdraw(call):
+    withdrawal_id = int(call.data.split("_")[1])
+    update_withdrawal_status(withdrawal_id, "Принято")
+    bot.edit_message_text(
+        call.message.text + "\n\n✅ Статус: Принято",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id, "Заявка принята")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reject_"))
+def reject_withdraw(call):
+    withdrawal_id = int(call.data.split("_")[1])
+    update_withdrawal_status(withdrawal_id, "Отклонено")
+    bot.edit_message_text(
+        call.message.text + "\n\n❌ Статус: Отклонено",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id, "Заявка отклонена")
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("task_check_"))
 def task_done_callback(call):
     user_id = call.from_user.id
