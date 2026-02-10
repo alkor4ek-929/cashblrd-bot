@@ -210,7 +210,7 @@ def register_referral(user_id, referrer_id):
     c.execute("SELECT referrer_id FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     if row and row[0] is not None:
-    return
+        return
     c.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, referrer_id))
     c.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id = ?", (referrer_id,))
     add_stars(referrer_id, 7)   
@@ -327,7 +327,6 @@ def get_sponsor_stats():
               "LEFT JOIN subscriptions sub ON sub.sponsor_id = s.id GROUP BY s.id")
     return c.fetchall()
 
-def create_withdrawal(user_id, username, amount, item):
 def create_withdrawal(user_id, username, amount, item):
     c = conn.cursor()
     c.execute("""
@@ -663,14 +662,16 @@ def admin_view_profile(call):
 def view_profile_handler(message):
     query = message.text.strip().lstrip("@")
     try:
-        if query.isdigit():
-            user_id = int(query)
-        else:
+    if query.isdigit():
+        user_id = int(query)
+    else:
         bot.reply_to(message, "Пока поддерживается только поиск по user_id. Введи числовой ID.")
+        del admin_states[message.from_user.id]
         return
-        except:
-        bot.reply_to(message, "Не удалось найти юзера. Введи числовой user_id.")
-        return
+except:
+    bot.reply_to(message, "Не удалось найти юзера. Введи числовой user_id.")
+    del admin_states[message.from_user.id]
+    return
 
     profile = get_user_profile(user_id)
     if not profile:
