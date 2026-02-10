@@ -588,7 +588,7 @@ def market(message):
         "Выбери товар ниже 👇", 
         reply_markup=markup, parse_mode="Markdown")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["buy_gift", "market_balance"])
+@bot.callback_query_handler(func=lambda call: call.data in ["buy_gift", "market_balance", "tasks"])
 def market_callback(call):
     user_id = call.from_user.id
     username = call.from_user.username or "без_ника"
@@ -599,7 +599,7 @@ def market_callback(call):
         return
 
     if call.data == "tasks":
-        tasks_handler(call.message) # Вызываем функцию заданий
+        tasks_handler(call.message)
         bot.answer_callback_query(call.id)
         return
         
@@ -625,7 +625,7 @@ def market_callback(call):
             InlineKeyboardButton("✅ Принять", callback_data=f"accept_{withdrawal_id}"),
             InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{withdrawal_id}")
         ) 
-        bot.send_message(WITHDRAW_CHANNEL, text, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(WITHDRAW_CHANNEL, text, reply_markup=markup)
         bot.answer_callback_query(call.id, "Заявка создана! Ожидай обработки в канале: @cashzay", show_alert=True)
 
 # ==================== ЛИДЕРБОРД ====================
